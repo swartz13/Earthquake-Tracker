@@ -5,6 +5,8 @@
 [![UI](https://img.shields.io/badge/Jetpack%20Compose-BOM%202024.10.01-blue.svg)](https://developer.android.com/jetpack/compose)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
+> 🇹🇷 **Türkçe dokümantasyon için [Turkish/README.md](Turkish/README.md) dosyasını inceleyebilirsiniz.**
+
 An ultra-low latency, real-time earthquake monitoring and emergency alerting Android application. It monitors seismic events around your location or chosen reference point simultaneously from **EMSC** (live global WebSocket), **AFAD** (Disaster and Emergency Management Authority of Turkey), and **Kandilli Observatory (KOERI)**.
 
 The app is engineered with a **zero-wait alert policy**: it immediately alerts upon the *first* agency's report without waiting for consensus, and seamlessly updates notifications in real-time as other agencies publish their verified solutions.

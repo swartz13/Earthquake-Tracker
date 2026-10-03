@@ -33,6 +33,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import com.berk.deprem.ui.LocalStrings
 import com.berk.deprem.ui.Strings
 import com.berk.deprem.service.LocationFinder
+import android.util.Log
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -148,17 +150,24 @@ class MainActivity : ComponentActivity() {
     }
     }
 
+    private var locationJob: Job? = null
+
     private fun refreshDeviceLocationNow() {
         if (!Repo.prefs.current.useDeviceLocation || !hasLocationPermission()) return
-        lifecycleScope.launch {
-            val finder = LocationFinder(this@MainActivity)
-            val loc = finder.current(timeoutMs = 5000)
-            if (loc != null) {
-                Repo.prefs.update {
-                    it.copy(homeLat = loc.latitude, homeLon = loc.longitude, homeFromDevice = true)
+        locationJob?.cancel()
+        locationJob = lifecycleScope.launch {
+            runCatching {
+                val finder = LocationFinder(this@MainActivity)
+                val loc = finder.current(timeoutMs = 5000)
+                if (loc != null) {
+                    Repo.prefs.update {
+                        it.copy(homeLat = loc.latitude, homeLon = loc.longitude, homeFromDevice = true)
+                    }
+                    Repo.locationStatus.value = null
+                    Repo.bumpNetwork()
                 }
-                Repo.locationStatus.value = null
-                Repo.bumpNetwork()
+            }.onFailure { e ->
+                Log.w("MainActivity", "Konum yenileme hatasi: ${e.message}")
             }
         }
     }

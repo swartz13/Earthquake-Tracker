@@ -44,38 +44,43 @@ class LocationFinder(private val ctx: Context) {
      * Degilse tum saglayicilardan yeni olcum ister. Yeni olcum gelmezse
      * elde olan son onbellegi kullanir.
      */
-    suspend fun current(timeoutMs: Long = 15_000): Location? {
+    suspend fun current(timeoutMs: Long = 15_000): Location? = runCatching {
         if (!hasPermission()) {
             Log.w(TAG, "konum izni yok")
-            return null
+            return@runCatching null
         }
-        val lm = lm ?: return null
+        val lm = lm ?: return@runCatching null
         if (!LocationManagerCompat.isLocationEnabled(lm)) {
             Log.w(TAG, "cihazda konum servisi kapali")
-            return null
+            return@runCatching null
         }
 
         val onbellek = sonBilinen()
         if (onbellek != null && yas(onbellek) < TAZE_ONBELLEK_MS) {
             Log.i(TAG, "taze onbellek konumu kullanildi (${yas(onbellek) / 1000} sn once)")
-            return onbellek
+            return@runCatching onbellek
         }
 
-        val taze = withTimeoutOrNull(timeoutMs) { yeniOlcum() }
+        val taze = withTimeoutOrNull(timeoutMs) {
+            runCatching { yeniOlcum() }.getOrNull()
+        }
         if (taze != null) {
             Log.i(TAG, "yeni olcum alindi: ${taze.latitude}, ${taze.longitude}")
-            return taze
+            return@runCatching taze
         }
 
         // Yeni olcum zaman asimina ugradiysa eldeki onbellek konumu
         // (ne kadar eski olursa olsun) deprem mesafesi hesaplamak icin hicten iyidir.
         if (onbellek != null) {
             Log.i(TAG, "yeni olcum gelmedi, onbellek konumu kullanildi (${yas(onbellek) / 1000} sn once)")
-            return onbellek
+            return@runCatching onbellek
         }
 
         Log.w(TAG, "hicbir konum bulunamadi")
-        return null
+        null
+    }.getOrElse { e ->
+        Log.w(TAG, "current() konum alirken hata: ${e.message}", e)
+        sonBilinen()
     }
 
     private fun yas(l: Location) = System.currentTimeMillis() - l.time
@@ -118,17 +123,24 @@ class LocationFinder(private val ctx: Context) {
             return@suspendCancellableCoroutine
         }
 
+        val completed = java.util.concurrent.atomic.AtomicBoolean(false)
+        val iptal = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) CancellationSignal() else null
+
         val listener = object : LocationListener {
             override fun onLocationChanged(location: Location) {
                 if (location.latitude != 0.0 || location.longitude != 0.0) {
-                    runCatching { lm.removeUpdates(this) }
-                    if (cont.isActive) cont.resume(location)
+                    if (completed.compareAndSet(false, true)) {
+                        runCatching { lm.removeUpdates(this) }
+                        runCatching { iptal?.cancel() }
+                        if (cont.isActive) cont.resume(location)
+                    }
                 }
             }
         }
 
         cont.invokeOnCancellation {
             runCatching { lm.removeUpdates(listener) }
+            runCatching { iptal?.cancel() }
         }
 
         var registeredAny = false
@@ -139,22 +151,23 @@ class LocationFinder(private val ctx: Context) {
             }
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val iptal = CancellationSignal()
-            cont.invokeOnCancellation { runCatching { iptal.cancel() } }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && iptal != null) {
             for (provider in activeProviders) {
                 runCatching {
                     lm.getCurrentLocation(provider, iptal, ctx.mainExecutor) { loc ->
                         if (loc != null && (loc.latitude != 0.0 || loc.longitude != 0.0)) {
-                            runCatching { lm.removeUpdates(listener) }
-                            if (cont.isActive) cont.resume(loc)
+                            if (completed.compareAndSet(false, true)) {
+                                runCatching { lm.removeUpdates(listener) }
+                                runCatching { iptal.cancel() }
+                                if (cont.isActive) cont.resume(loc)
+                            }
                         }
                     }
                 }
             }
         }
 
-        if (!registeredAny && cont.isActive) {
+        if (!registeredAny && completed.compareAndSet(false, true) && cont.isActive) {
             cont.resume(null)
         }
     }
